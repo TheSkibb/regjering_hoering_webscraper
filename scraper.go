@@ -34,6 +34,7 @@ type Horingssvar struct {
     HoringsTitle string
     Pdf_link string
     Text string
+    Url string
 }
 
 func main() {
@@ -45,13 +46,21 @@ func main() {
     for i, s := range scrapeResult.Result{
         fmt.Println(i, s.Url)
         scrapHoringPage(s.Url, i, &scrapeResult)
+        for in, svar := range scrapeResult.Result[i].Horingssvar{
+            if svar.Pdf_link == "" {
+                scrapeHoringssvar(svar.Url, &scrapeResult, i, in)
+                fmt.Println("scraping horingssvar")
+            } else {
+                fmt.Println("link already")
+            }
+            if svar.Pdf_link != "" && svar.Pdf_link[0] == 47 {
+                svar.Pdf_link = "https://regjeringen.no" + svar.Pdf_link
+            }
+        }
     }
     fmt.Println("scrape complete")
     fmt.Println("******************")
     fmt.Println("results")
-    /*for i, s := range scrapeResult.result{
-        fmt.Println(i, s)
-    }*/
 
     file, err := json.MarshalIndent(scrapeResult, "", " ")
 
@@ -113,6 +122,22 @@ func scrapHoringPage(url string, index int, scrapeResult *HoringResult){
     })
 
     //horingssvar []horingssvar
+    c.OnHTML("div#horingssvar ul.link-list a[href]", func(e *colly.HTMLElement) {
+        maxSvar := 10
+        if len(scrapeResult.Result[index].Horingssvar) < maxSvar {
+            url := e.Attr("href")
+            svar := Horingssvar{
+                Url: url,
+            }
+
+            if strings.Contains(url, ".pdf?uid"){
+                svar.Pdf_link = "https://regjeringen.no" + url
+                svar.Header = "Svar fra " + e.Text
+            }
+
+            scrapeResult.Result[index].Horingssvar = append(scrapeResult.Result[index].Horingssvar, svar)
+        }
+    })
 
     //id string
     c.OnRequest(func(r *colly.Request) {
@@ -143,4 +168,31 @@ func scrapHoringPage(url string, index int, scrapeResult *HoringResult){
         fmt.Printf("error while scraping: %s\n", err.Error())
     })
     c.Visit("https://www.regjeringen.no" + url)
+}
+
+func scrapeHoringssvar(url string, scrapeResult *HoringResult, horinIndex, svarIndex int){
+    c := colly.NewCollector(
+        colly.AllowedDomains("www.regjeringen.no"),
+    )
+
+    // Header
+    c.OnHTML("header.article-header", func(e *colly.HTMLElement) {
+        *&scrapeResult.Result[horinIndex].Horingssvar[svarIndex].Header = strings.TrimSpace(strings.ReplaceAll(e.Text, "\n", ""))
+    })
+
+    // Text
+    c.OnHTML("div.article-body p", func(e *colly.HTMLElement) {
+        *&scrapeResult.Result[horinIndex].Horingssvar[svarIndex].Text = e.Text
+    })
+
+    // Pdf_link
+    c.OnHTML("div.hearing-answer ul.link-list a[href]", func(e *colly.HTMLElement) {
+        *&scrapeResult.Result[horinIndex].Horingssvar[svarIndex].Pdf_link = e.Attr("href")
+    })
+
+    c.OnError(func(r *colly.Response, err error) {
+        fmt.Printf("error while scraping: %s\n", err.Error())
+    })
+
+    c.Visit("https://www.regjeringen.no" + scrapeResult.Result[horinIndex].Url + url)
 }
